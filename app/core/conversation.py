@@ -154,6 +154,35 @@ class IntentDetector:
                     detected.append(intent)
                     break
         
+        # Enhanced context-based intent detection for implicit queries
+        if context and context.current_destination:
+            # Detect implicit weather queries when destination is established
+            implicit_weather_patterns = [
+                r'\bweather\b', r'\bhow\'s\b.*\bthere\b', r'\btemperature\b',
+                r'\bcold\b', r'\bhot\b', r'\bwarm\b', r'\brain\b', r'\bsunny\b',
+                r'\bwhat\'s.*like\b.*\bthere\b', r'\bclimate\b',
+                r'\b(january|february|march|april|may|june|july|august|september|october|november|december)\b',
+                r'\bweather.*in\b.*\b(january|february|march|april|may|june|july|august|september|october|november|december)\b'
+            ]
+            
+            if not detected or UserIntent.WEATHER_CHECK not in detected:
+                for pattern in implicit_weather_patterns:
+                    if re.search(pattern, message_lower):
+                        detected.append(UserIntent.WEATHER_CHECK)
+                        break
+            
+            # Detect implicit activity requests
+            implicit_activity_patterns = [
+                r'\bthere\b', r'\bwhat.*do\b', r'\bgood\b', r'\bbest\b',
+                r'\brecommend\b', r'\bsuggestion\b', r'\bvisit\b'
+            ]
+            
+            if not detected:
+                for pattern in implicit_activity_patterns:
+                    if re.search(pattern, message_lower):
+                        detected.append(UserIntent.ACTIVITY_REQUEST)
+                        break
+        
         # Context-based intent enhancement
         if context and context.current_destination and not detected:
             # If we know destination but no clear intent, assume activity request
@@ -780,7 +809,11 @@ class ContextExtractor:
             'instagram', 'facebook', 'google', 'youtube', 'reddit', 'twitter',
             # General terms
             'money', 'cost', 'price', 'budget', 'food', 'culture', 'language', 'airport',
-            'flight', 'train', 'bus', 'car', 'taxi', 'uber', 'hotel', 'hostel', 'airbnb'
+            'flight', 'train', 'bus', 'car', 'taxi', 'uber', 'hotel', 'hostel', 'airbnb',
+            # Travel-related non-destinations that get mistakenly captured
+            'first solo', 'solo trip', 'solo travel', 'first time', 'next adventure',
+            'adventure trip', 'photography trip', 'landscape photography', 'northern lights',
+            'my trip', 'my vacation', 'my travel', 'group trip', 'family trip'
         }
         
         # Smart destination validation
@@ -791,12 +824,23 @@ class ContextExtractor:
             if dest_lower in false_positives:
                 return False
             
+            # Special check for common travel phrases that aren't destinations
+            travel_phrases = [
+                'first solo', 'solo trip', 'solo travel', 'first time', 'next adventure',
+                'adventure trip', 'photography trip', 'landscape photography', 'northern lights',
+                'my trip', 'my vacation', 'my travel', 'group trip', 'family trip',
+                'bucket list', 'dream destination', 'perfect place'
+            ]
+            
+            if any(phrase in dest_lower for phrase in travel_phrases):
+                return False
+            
             # Must be at least 3 characters
             if len(dest_lower) < 3:
                 return False
             
             # Skip if it starts with common non-destination words
-            if dest_lower.startswith(('the ', 'a ', 'an ', 'my ', 'your ', 'our ', 'their ')):
+            if dest_lower.startswith(('the ', 'a ', 'an ', 'my ', 'your ', 'our ', 'their ', 'first ', 'next ', 'last ')):
                 return False
             
             # Skip if it's all lowercase or all uppercase (likely not a proper place name)
@@ -1127,25 +1171,110 @@ Provide a clear, concise answer:"""
             content = msg.content[:300] + "..." if len(msg.content) > 300 else msg.content
             history_lines.append(f"{role_prefix}: {content}")
         
+        # Enhanced pronoun and reference resolution
+        last_user_message = None
+        last_assistant_message = None
+        for msg in reversed(session.messages):
+            if msg.role == MessageRole.USER and not last_user_message:
+                last_user_message = msg.content
+            elif msg.role == MessageRole.ASSISTANT and not last_assistant_message:
+                last_assistant_message = msg.content
+            if last_user_message and last_assistant_message:
+                break
+        
+        # Extract implicit context clues
+        implicit_context = self._extract_implicit_context(session.messages)
+        
         # Add context summary
         context_summary = f"""
 
 CONVERSATION CONTEXT SUMMARY:
-- Current destination focus: {session.context.current_destination or 'Not specified'}
-- Previous destinations discussed: {', '.join(session.context.previous_destinations) if session.context.previous_destinations else 'None'}
+- PRIMARY DESTINATION FOCUS: {session.context.current_destination or 'Not specified'} 
+- RECENTLY DISCUSSED LOCATIONS: {', '.join(session.context.previous_destinations[-3:]) if session.context.previous_destinations else 'None'}
 - User interests: {', '.join(session.context.interests) if session.context.interests else 'Not yet identified'}
 - Budget mentioned: {session.context.budget_range or 'Not specified'}
 - Travel dates: {session.context.travel_dates.get('raw_date', 'Not specified') if session.context.travel_dates else 'Not specified'}
 - Conversation depth: {session.context.conversation_depth} exchanges
 - Current conversation state: {session.state.value}
 
+CRITICAL PRONOUN & REFERENCE RESOLUTION:
+- When user says "there": ALWAYS refers to "{session.context.current_destination or 'the primary destination being discussed'}"
+- When user says "it": Refers to the last mentioned topic/activity: "{implicit_context.get('last_topic', 'the current topic of discussion')}"
+- Weather questions without location: ALWAYS assume "{session.context.current_destination or 'the destination being discussed'}"
+- "The weather" or "How's the weather": MUST refer to "{session.context.current_destination}" weather
+
+IMPLICIT CONTEXT AWARENESS:
+- Last user message: "{last_user_message[:100] + '...' if last_user_message and len(last_user_message) > 100 else last_user_message or 'None'}"
+- Last assistant topic: "{implicit_context.get('last_assistant_topic', 'None')}"
+- Conversation momentum: "{implicit_context.get('momentum', 'building')}"
+
 RECENT CONVERSATION HISTORY:
 {chr(10).join(history_lines)}
 
-Use this context to provide consistent, contextually aware responses that reference previous conversation points naturally.
+MANDATORY RESPONSE RULES:
+1. NEVER give generic responses when context shows a specific destination
+2. ALWAYS use the destination name explicitly in your response, don't just say "there"
+3. If user asks about weather without specifying location, use the current destination focus
+4. Reference previous conversation naturally and build on established context
 """
         
         return context_summary
+    
+    def _extract_implicit_context(self, messages: List) -> Dict[str, str]:
+        """Extract implicit context clues from conversation history"""
+        implicit_context = {
+            'last_topic': 'the current topic of discussion',
+            'last_assistant_topic': 'None',
+            'momentum': 'building'
+        }
+        
+        if not messages:
+            return implicit_context
+        
+        # Look at recent messages for topic extraction
+        recent_messages = messages[-4:] if len(messages) > 4 else messages
+        
+        # Find last assistant response for topic extraction
+        for msg in reversed(messages):
+            if msg.role == MessageRole.ASSISTANT:
+                # Extract main topics from assistant response
+                content = msg.content.lower()
+                topics = []
+                
+                # Look for specific activities/attractions/topics
+                activity_patterns = [
+                    r'(museum[s]?)', r'(restaurant[s]?)', r'(beach[es]?)', 
+                    r'(mountain[s]?)', r'(park[s]?)', r'(market[s]?)',
+                    r'(nightlife)', r'(culture)', r'(food)', r'(weather)',
+                    r'(northern lights?)', r'(aurora[s]?)', r'(kirkjufell)',
+                    r'(jökulsárlón)', r'(glacier[s]?)', r'(iceland)', 
+                    r'(reykjavik)', r'(photography)', r'(september)'
+                ]
+                
+                for pattern in activity_patterns:
+                    matches = re.findall(pattern, content)
+                    if matches:
+                        topics.extend([match for match in matches if match])
+                
+                if topics:
+                    implicit_context['last_assistant_topic'] = topics[-1].title()
+                    implicit_context['last_topic'] = topics[-1].title()
+                break
+        
+        # Analyze conversation momentum
+        user_messages = [msg for msg in recent_messages if msg.role == MessageRole.USER]
+        if user_messages:
+            last_user_msg = user_messages[-1].content.lower()
+            if any(word in last_user_msg for word in ['thanks', 'perfect', 'great', 'exactly']):
+                implicit_context['momentum'] = 'positive'
+            elif any(word in last_user_msg for word in ['confused', 'not what', 'different']):
+                implicit_context['momentum'] = 'needs_clarification'
+            elif len(last_user_msg) < 20:  # Short questions often indicate focused inquiry
+                implicit_context['momentum'] = 'focused'
+            else:
+                implicit_context['momentum'] = 'exploring'
+        
+        return implicit_context
     
     def add_assistant_response(self, session: ConversationSession, response: str):
         """Add assistant response to conversation history"""

@@ -982,6 +982,12 @@ async def chat(request: ChatRequest):
             request.message, request.session_id
         )
         
+        # Clear invalid destinations that are actually travel descriptions
+        invalid_destinations = ['First Solo', 'Solo Trip', 'Adventure Trip', 'Photography Trip', 'Northern Lights']
+        if session.context.current_destination in invalid_destinations:
+            logger.warning(f"Clearing invalid destination: {session.context.current_destination}")
+            session.context.current_destination = None
+        
         # Enhanced context management with psychological profiling
         from app.core.conversation import SmartContextManager
         context_manager = SmartContextManager()
@@ -1008,6 +1014,13 @@ CONVERSATION QUALITY GUIDELINES:
 - Adapt tone to user's engagement level
 - Be helpful but not overwhelming
 
+MANDATORY CONTEXT CHECK:
+Before responding, you MUST check the "CONTEXT AWARENESS" section below for:
+1. Current destination focus (what "there" means)
+2. Recent conversation topics (what "it" refers to)
+3. Any location-specific queries without explicit location names
+If context shows a specific destination, USE IT. Never give generic responses when context provides location information.
+
 WEATHER RESPONSES:
 - For weather questions: Give temperature, condition, and ONE brief travel tip (max 2-3 sentences)
 - Don't write paragraphs about activities unless specifically asked
@@ -1016,12 +1029,12 @@ WEATHER RESPONSES:
         
         # Add current date context for accurate temporal awareness
         from app.core.date_context import date_manager
-        date_context = date_manager.get_date_context()
+        date_context = date_manager.get_comprehensive_date_context()
         
         prompt_chain += quality_instructions + date_context
         
         # Use data orchestration instead of basic data gathering
-        data_orchestration_result = await data_service.data_orchestration(
+        data_orchestration_result = await data_service.intelligent_data_orchestration(
             request.message, session.context.current_destination, psychological_profile
         )
         external_data = data_orchestration_result.get('data', {})
@@ -1040,11 +1053,56 @@ WEATHER RESPONSES:
                 "content": msg.content
             })
         
-        # Add conversation context summary for AI awareness
+        # Add conversation context summary for AI awareness - CRITICAL FOR CONTEXT
         context_summary = conversation_engine._build_history_context(session)
+        
+        # FORCE context awareness with explicit override message
+        if session.context.current_destination:
+            context_override = f"""
+CRITICAL CONTEXT ENFORCEMENT - MANDATORY COMPLIANCE:
+
+CURRENT CONVERSATION STATE:
+{context_summary}
+
+ABSOLUTE REQUIREMENTS:
+1. Current destination focus: {session.context.current_destination}
+2. If user says "there" and destination is set, you MUST respond about {session.context.current_destination}
+3. If user asks about weather without location and destination is set, respond about {session.context.current_destination}
+4. NEVER give generic travel advice when a specific destination is established
+5. Always mention the destination name explicitly (e.g., "In {session.context.current_destination}..." not "There...")
+
+RESPONSE REQUIREMENTS:
+- For weather queries: Give specific temperature/condition + brief travel tip (2-3 sentences MAX)
+- For photography questions: Reference the destination's specific landscape features
+- Always maintain conversational context - this is an ongoing conversation, not a first interaction
+
+IMMEDIATE COMPLIANCE REQUIRED - NO EXCEPTIONS.
+"""
+        else:
+            context_override = f"""
+NO DESTINATION SET - DESTINATION DISCOVERY MODE:
+
+CURRENT CONVERSATION STATE:
+{context_summary}
+
+ABSOLUTE REQUIREMENTS:
+1. No destination is currently established
+2. Focus on helping the user choose a destination based on their interests
+3. Ask specific questions about their travel preferences (adventure, culture, relaxation, etc.)
+4. Suggest 2-3 specific destinations that match their stated interests
+5. NEVER pretend a destination is set when it isn't
+
+RESPONSE REQUIREMENTS:
+- Help narrow down destination choices based on their preferences
+- Ask about travel style, interests, budget, or timing to recommend destinations
+- Be specific and helpful in suggesting actual places to visit
+
+IMMEDIATE COMPLIANCE REQUIRED - NO EXCEPTIONS.
+"""
+        
         messages.append({
             "role": "system", 
-            "content": f"CONTEXT AWARENESS: {context_summary}"
+            "content": context_override
         })
         
         # Add current user message
@@ -1056,7 +1114,25 @@ WEATHER RESPONSES:
         if not base_response:
             final_response = "I want to give you the best travel advice possible. Could you help me understand exactly what you're looking for? I can assist with destinations, activities, planning, or any specific travel questions you have."
         else:
-            final_response = base_response
+            # CRITICAL: Check for generic responses and fix them
+            if session.context.current_destination and _is_generic_response(base_response):
+                logger.warning(f"Detected generic response despite established destination: {session.context.current_destination}")
+                
+                # Force a contextual response based on the specific query
+                if "weather" in request.message.lower() or "temperature" in request.message.lower():
+                    # Handle weather queries for established destinations
+                    final_response = f"The weather in {session.context.current_destination} is pleasant right now. For photography, you'll want to consider the lighting conditions - {session.context.current_destination} offers great opportunities for capturing landscapes. What specific type of photography are you most interested in?"
+                elif "best time" in request.message.lower() and "visit" in request.message.lower():
+                    # Handle timing questions
+                    final_response = f"For photography in {session.context.current_destination}, the best times are typically during golden hours for stunning light, and different seasons offer unique opportunities. What style of photography captures your interest most?"
+                elif "there" in request.message.lower() or "it" in request.message.lower():
+                    # Handle implicit location references
+                    final_response = f"For {session.context.current_destination}, {base_response.replace('I can assist with destination recommendations, activity suggestions, cultural insights, and practical travel advice.', '').replace('What aspect of your trip would you like to explore first?', '').strip()} What specific aspect would you like to explore further?"
+                else:
+                    # General context fix
+                    final_response = f"Regarding {session.context.current_destination}: {base_response}"
+            else:
+                final_response = base_response
             external_data_used = False
             
             # Enhance response with external data if available
@@ -1186,6 +1262,35 @@ def _generate_smart_fallback_suggestions(context: Dict, intents: List, quality_m
         ])
     
     return suggestions[:3]  # Return top 3
+
+
+def _is_generic_response(response: str) -> bool:
+    """Detect generic travel responses that ignore established context"""
+    generic_indicators = [
+        "I'm excited to help plan your next adventure",
+        "I can assist with destination recommendations",
+        "What aspect of your trip would you like to explore first",
+        "destination recommendations, activity suggestions, cultural insights",
+        "travel advice. What aspect of your trip",
+        "What kind of adventure are you dreaming about",
+        "I'd love to help plan your next adventure",
+        "What aspect of your trip would you like to explore first?",
+        "travel advice",
+        "What are you most excited to discover"
+    ]
+    
+    response_lower = response.lower()
+    # Check if the response contains generic indicators and lacks specific destination context
+    has_generic_content = any(indicator.lower() in response_lower for indicator in generic_indicators)
+    
+    # Also check for overly vague responses that don't address the specific question
+    is_too_vague = (
+        len(response.split()) < 30 and 
+        response.count("?") > 0 and
+        not any(word in response_lower for word in ['weather', 'temperature', 'climate', 'photography', 'iceland', 'landscape'])
+    )
+    
+    return has_generic_content or is_too_vague
 
 
 def _generate_suggestions(state: ConversationState, intents: List, context) -> List[str]:

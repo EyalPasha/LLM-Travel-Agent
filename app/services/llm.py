@@ -102,26 +102,16 @@ class HuggingFaceService:
                     
                     # Check for hallucinations
                     if ResponseValidator.is_hallucination(raw_response, user_query):
-                        return self._fallback_response("I don't have access to real-time data, but I can help with general travel advice.")
+                        return self._recovery_response("hallucination", user_query)
                     
                     # Check for confusion
                     if ResponseValidator.is_confused_response(raw_response):
-                        return self._fallback_response("Could you clarify what specific travel information you're looking for?")
+                        return self._recovery_response("confusion", user_query)
                     
                     # Enhance response quality
                     enhanced_response = ResponseValidator.enhance_response_quality(raw_response, user_query)
                     
                     return enhanced_response
-                    user_query = messages[-1]["content"] if messages else ""
-                    
-                    if ResponseValidator.is_hallucination(raw_response, user_query):
-                        return self._recovery_response("hallucination", user_query)
-                    
-                    if ResponseValidator.is_confused_response(raw_response):
-                        return self._recovery_response("confusion", user_query)
-                    
-                    # Enhance response quality
-                    return ResponseValidator.enhance_response_quality(raw_response, user_query)
                 else:
                     print(f"Hugging Face API error: {response.status_code} - {response.text}")
                     return self._fallback_response("I'm experiencing technical difficulties. Let me provide a basic response.")
