@@ -55,7 +55,7 @@ class ErrorPattern:
 
 
 class ConversationRecoveryEngine:
-    """Sophisticated conversation recovery system with learning capabilities"""
+    """Conversation recovery system with learning capabilities"""
     
     def __init__(self):
         self.error_history = {}

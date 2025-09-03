@@ -1,7 +1,3 @@
-"""
-Sophisticated Conversation Engine with State Management and Context Awareness
-"""
-
 import uuid
 import re
 from typing import Dict, List, Optional, Tuple
@@ -1040,16 +1036,16 @@ class ConversationEngine:
         return session, intents
     
     def build_prompt_chain(self, session: ConversationSession, user_message: str, psychological_profile: Dict = None) -> str:
-        """Build sophisticated prompt chain for LLM with psychological insights"""
+        """Build prompt chain for LLM with psychological insights"""
         
         # Detect if this is a simple informational query
         is_simple_query = self._is_simple_informational_query(user_message, session.detected_intents)
         
         if is_simple_query:
-            # Use simplified prompt for straightforward questions
+            # Use prompt for straightforward questions
             return self._build_simple_prompt(session, user_message)
         
-        # Use full sophisticated prompt for complex queries
+        # Use full prompt for complex queries
         # Get system prompt
         system_prompt = self.prompt_orchestrator.get_system_prompt(session.context)
         

@@ -1,10 +1,3 @@
-"""
-Advanced Prompt Engineering System for Travel Intelligence Assistant
-
-This module contains sophisticated prompt templates and chaining strategies
-designed to maximize LLM performance through careful prompt engineering.
-"""
-
 from typing import Dict, Any, List, Optional
 from app.models.conversation import ConversationState, UserIntent, ConversationContext
 
@@ -205,7 +198,7 @@ Confidence Indicators: [How certain we are about data-driven advice]
 Generate a response that demonstrates sophisticated data intelligence:
 """, ["external_data", "confidence_level", "context_relevance", "temporal_importance", "decision_impact", "llm_baseline", "enhancement_potential", "conflict_handling", "synthesis_value", "base_response"])
 
-    # Sophisticated Conversation Recovery System
+    # Conversation Recovery System
     CONVERSATION_RECOVERY_PROMPT = PromptTemplate("""
 ADVANCED CONVERSATION RECOVERY ENGINE:
 
