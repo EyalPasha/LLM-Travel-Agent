@@ -70,28 +70,6 @@ ENV/
 env.bak/
 venv.bak/
 
-
-# Model files
-*.pkl
-*.joblib
-*.h5
-*.pb
-*.ckpt
-*.pth
-*.bin
-*.safetensors
-model/
-models/
-checkpoints/
-
-# Data files
-data/
-datasets/
-*.csv
-*.json
-*.parquet
-*.feather
-
 # Logs
 logs/
 *.log
