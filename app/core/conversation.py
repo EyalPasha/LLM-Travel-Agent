@@ -734,25 +734,25 @@ class ContextExtractor:
     """Enhanced context extraction with smart pattern recognition"""
     
     DESTINATION_PATTERNS = [
-        # Direct travel action patterns - more precise
-        r'\b(?:visit|visiting|go to|going to|traveling to|trip to|fly to|heading to|bound for)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,1})\b',
+        # Direct travel action patterns - more precise with negative lookbehind/lookahead
+        r'\b(?:visit|visiting|go to|going to|traveling to|trip to|fly to|heading to|bound for)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})(?!\s+(?:before|after|while|when|if|unless|during|since|until))\b',
         r'\b(?:from|leaving)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:to|for)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b',
         
-        # Preposition-based patterns - more conservative
-        r'\b(?:in|at|around|near)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b',
-        r'\babout\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b',
+        # Preposition-based patterns - more conservative with context checks
+        r'\b(?:in|at|around|near)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)(?!\s+(?:before|after|while|when|if|unless|during|since|until|order|case|time|general))\b',
+        r'\babout\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)(?!\s+(?:before|after|while|when|if|unless|during|since|until|time|it|that|this))\b',
         
-        # Question patterns
-        r'\bhow\'s\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b',
+        # Question patterns with context awareness
+        r'\bhow\'s\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)(?!\s+(?:before|after|while|when|going|doing|working))\b',
         
-        # Possessive patterns - more specific
-        r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\'s\s+(?:weather|climate|food|culture|people|attractions|museums|restaurants|nightlife|beaches|mountains|history)\b',
+        # Possessive patterns - more specific with better context
+        r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\'s\s+(?:weather|climate|food|culture|people|attractions|museums|restaurants|nightlife|beaches|mountains|history|customs|traditions)\b',
         
         # Comparison patterns
         r'\b(?:than|versus|vs\.?|compared to)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b',
         r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:vs\.?|versus)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b',
         
-        # Context-specific patterns
+        # Context-specific patterns with better boundaries
         r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:trip|vacation|journey|adventure|getaway)\b',
         r'\b(?:through|across)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b'
     ]
@@ -881,14 +881,57 @@ class ContextExtractor:
             # Default: if it passes basic checks, consider it a potential destination
             return True
         
-        # Filter and clean destinations
+        # Filter and clean destinations with context validation
         clean_destinations = []
         for dest in destinations:
             dest_clean = dest.strip().title()
-            if is_likely_destination(dest_clean) and dest_clean not in clean_destinations:
-                clean_destinations.append(dest_clean)
+            
+            # Additional context validation - check what comes after the potential destination
+            if self._validate_destination_context(dest_clean, message_original):
+                if is_likely_destination(dest_clean) and dest_clean not in clean_destinations:
+                    clean_destinations.append(dest_clean)
         
         return clean_destinations[:5]  # Limit to prevent false positive overload
+    
+    def _validate_destination_context(self, destination: str, original_message: str) -> bool:
+        """Validate that the destination makes sense in its surrounding context"""
+        dest_lower = destination.lower()
+        message_lower = original_message.lower()
+        
+        # Find the position of the destination in the message
+        dest_pos = message_lower.find(dest_lower)
+        if dest_pos == -1:
+            return False
+        
+        # Check what comes immediately after the destination
+        after_dest_pos = dest_pos + len(dest_lower)
+        if after_dest_pos < len(message_lower):
+            # Get the next 20 characters to check context
+            after_context = message_lower[after_dest_pos:after_dest_pos + 20].strip()
+            
+            # If it's followed by temporal/conditional words, it's likely not a standalone destination
+            exclusion_words = [
+                'before', 'after', 'while', 'when', 'if', 'unless', 'during', 
+                'since', 'until', 'and then', 'or', 'but', 'however',
+                'in order', 'in case', 'in time', 'in general'
+            ]
+            
+            for word in exclusion_words:
+                if after_context.startswith(word):
+                    return False
+        
+        # Check what comes before the destination  
+        before_context = message_lower[max(0, dest_pos - 20):dest_pos].strip()
+        
+        # If it's preceded by certain words, it might not be a destination
+        if before_context.endswith(('about', 'like', 'such as', 'including')):
+            # These could be valid, but need stronger evidence
+            # Only accept if there are strong travel indicators nearby
+            travel_indicators = ['visit', 'travel', 'trip', 'vacation', 'customs', 'culture']
+            if not any(indicator in message_lower for indicator in travel_indicators):
+                return False
+        
+        return True
     
     def extract_budget_info(self, message: str) -> Optional[str]:
         """Extract budget information from message"""

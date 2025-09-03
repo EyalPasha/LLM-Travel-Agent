@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse, Response
 from contextlib import asynccontextmanager
 import logging
 import time
+import re
 from typing import List, Optional, Dict
 from datetime import datetime
 
@@ -983,8 +984,25 @@ async def chat(request: ChatRequest):
         )
         
         # Clear invalid destinations that are actually travel descriptions
-        invalid_destinations = ['First Solo', 'Solo Trip', 'Adventure Trip', 'Photography Trip', 'Northern Lights']
-        if session.context.current_destination in invalid_destinations:
+        def is_invalid_destination(dest: str) -> bool:
+            """Check if a destination is actually a travel description or phrase"""
+            if not dest:
+                return True
+            
+            dest_lower = dest.lower()
+            
+            # Check for common travel phrases that aren't destinations
+            invalid_patterns = [
+                r'.*\b(before|after|while|when|if|unless|during|since|until)\b',
+                r'^(first|next|last|my|your|our|their)\s+.*',
+                r'.*\b(trip|travel|vacation|journey|adventure|solo|group)\b.*',
+                r'.*\b(photography|landscape|northern lights|aurora)\b.*',
+                r'.*\b(time|moment|opportunity|experience|chance)\b.*'
+            ]
+            
+            return any(re.search(pattern, dest_lower) for pattern in invalid_patterns)
+        
+        if session.context.current_destination and is_invalid_destination(session.context.current_destination):
             logger.warning(f"Clearing invalid destination: {session.context.current_destination}")
             session.context.current_destination = None
         
