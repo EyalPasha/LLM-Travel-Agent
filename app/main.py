@@ -14,7 +14,7 @@ from datetime import datetime
 
 from app.core.config import settings
 from app.core.conversation import ConversationEngine
-from app.services.llm import HuggingFaceService
+from app.services.llm import OpenRouterService
 from app.services.external_apis import DataAugmentationService
 from app.models.conversation import ChatRequest, ChatResponse, ConversationState, MessageRole, UserIntent
 
@@ -51,7 +51,7 @@ app.add_middleware(
 
 # Initialize services
 conversation_engine = ConversationEngine()
-llm_service = HuggingFaceService()
+llm_service = OpenRouterService()
 data_service = DataAugmentationService()
 
 # Initialize systems  
@@ -1082,8 +1082,9 @@ WEATHER RESPONSES:
             {"role": "system", "content": prompt_chain},
         ]
         
-        # Add comprehensive conversation history for context (last 6 messages for better context)
-        recent_history = session.messages[-6:] if len(session.messages) > 6 else session.messages
+        # Add comprehensive conversation history for context (configurable amount)
+        max_history_messages = min(settings.MAX_CONVERSATION_HISTORY, len(session.messages))
+        recent_history = session.messages[-max_history_messages:] if len(session.messages) > max_history_messages else session.messages
         for msg in recent_history:
             messages.append({
                 "role": msg.role.value,
@@ -1227,9 +1228,12 @@ IMMEDIATE COMPLIANCE REQUIRED - NO EXCEPTIONS.
         ]
         
         # Enhanced suggestion generation with conversation momentum
-        suggestions = await llm_service.generate_contextual_suggestions(
+        raw_suggestions = await llm_service.generate_contextual_suggestions(
             final_response, conversation_history
         )
+        
+        # Filter and improve suggestions based on conversation context
+        suggestions = _filter_contextual_suggestions(raw_suggestions, session)
         
         # Quality assurance for suggestions
         if not suggestions or len(suggestions) < 2:
@@ -1277,6 +1281,63 @@ async def health_check():
     }
 
 
+def _filter_contextual_suggestions(raw_suggestions: List[str], session) -> List[str]:
+    """Filter suggestions to avoid generic responses and contradictions"""
+    from app.models.conversation import MessageRole
+    
+    filtered_suggestions = []
+    
+    # Extract user conversation history for context
+    user_messages = [msg.content.lower() for msg in session.messages if msg.role == MessageRole.USER]
+    user_context = ' '.join(user_messages)
+    
+    for suggestion in raw_suggestions:
+        suggestion_lower = suggestion.lower()
+        
+        # Skip overly generic suggestions when we have established context
+        if session.context.current_destination and any(generic in suggestion_lower for generic in [
+            "what's the best time to visit?",
+            "tell me about local cuisine",
+            "any cultural tips for travelers?",
+            "are you more interested in"
+        ]):
+            continue
+        
+        # Avoid contradictory suggestions based on confirmed preferences
+        if 'landscape' in user_context or 'photography' in user_context:
+            if any(city_word in suggestion_lower for city_word in ['city experiences', 'vibrant city', 'nightlife', 'urban']):
+                continue
+        
+        if 'solo' in user_context or 'first' in user_context:
+            if any(group_word in suggestion_lower for group_word in ['group tour', 'with friends']):
+                continue
+        
+        filtered_suggestions.append(suggestion)
+    
+    # Fill with contextual suggestions if we filtered too many
+    if len(filtered_suggestions) < 3 and session.context.current_destination:
+        dest = session.context.current_destination
+        
+        if 'photography' in user_context:
+            filtered_suggestions.extend([
+                f"What's the best photography gear for {dest}?",
+                f"When is golden hour in {dest}?",
+                f"Any hidden photo spots in {dest}?"
+            ])
+        elif 'weather' in user_context:
+            filtered_suggestions.extend([
+                f"What should I pack for {dest} weather?",
+                f"Best months to visit {dest}?",
+                f"Any weather-related travel tips for {dest}?"
+            ])
+        else:
+            filtered_suggestions.extend([
+                f"What makes {dest} special this time of year?",
+                f"Tell me more about what to expect in {dest}",
+                f"What should I prioritize in {dest}?"
+            ])
+    
+    return filtered_suggestions[:3] if filtered_suggestions else raw_suggestions[:3]
 
 
 def _generate_smart_fallback_suggestions(context: Dict, intents: List, quality_metrics: Dict) -> List[str]:

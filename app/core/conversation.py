@@ -1106,6 +1106,9 @@ class ConversationEngine:
         user_message = Message(role=MessageRole.USER, content=message)
         session.messages.append(user_message)
         
+        # Validate and track user preferences to prevent contradictions
+        self._track_user_preferences(session, message)
+        
         # Detect intents
         intents = self.intent_detector.detect_intents(message, session.context)
         session.detected_intents = intents
@@ -1181,16 +1184,29 @@ Please provide your response following the reasoning framework above:
         return any(re.search(pattern, message_lower) for pattern in simple_patterns)
     
     def _build_simple_prompt(self, session: ConversationSession, user_message: str) -> str:
-        """Build simple, concise prompt for factual queries"""
+        """Build simple, concise prompt for factual queries with destination context awareness"""
         history_context = self._build_history_context(session)
+        current_dest = session.context.current_destination
+        
+        # Build destination-aware instructions
+        destination_context = ""
+        if current_dest:
+            destination_context = f"""
+⚠️  CRITICAL DESTINATION CONTEXT: The user is asking about {current_dest}
+- Your answer MUST be specific to {current_dest}
+- NEVER give generic responses when {current_dest} is the established destination
+- Always mention "{current_dest}" by name in your response
+"""
         
         return f"""You are Sofia, a helpful travel consultant. Answer the user's question directly and concisely.
 
+{destination_context}
 CONVERSATION CONTEXT:
 {history_context}
 
 INSTRUCTIONS:
 - Answer the question directly in 1-2 sentences
+- Be specific to the established destination context
 - Add ONE brief, relevant follow-up or tip
 - Keep total response under 100 words
 - Be helpful but concise
@@ -1246,6 +1262,10 @@ CRITICAL PRONOUN & REFERENCE RESOLUTION:
 - Weather questions without location: ALWAYS assume "{session.context.current_destination or 'the destination being discussed'}"
 - "The weather" or "How's the weather": MUST refer to "{session.context.current_destination}" weather
 
+⚠️  CRITICAL: NEVER GIVE GENERIC RESPONSES WHEN A DESTINATION IS ESTABLISHED
+⚠️  ALWAYS mention the specific destination name in your response
+⚠️  If current_destination is set, your response MUST be specific to that location
+
 IMPLICIT CONTEXT AWARENESS:
 - Last user message: "{last_user_message[:100] + '...' if last_user_message and len(last_user_message) > 100 else last_user_message or 'None'}"
 - Last assistant topic: "{implicit_context.get('last_assistant_topic', 'None')}"
@@ -1254,14 +1274,109 @@ IMPLICIT CONTEXT AWARENESS:
 RECENT CONVERSATION HISTORY:
 {chr(10).join(history_lines)}
 
+USER PREFERENCE MEMORY (NEVER CONTRADICT THESE):
+{self._extract_confirmed_preferences(session)}
+
+CONVERSATION PROGRESSION RULES:
+- Exchange {session.context.conversation_depth}: {"Building context and preferences" if session.context.conversation_depth <= 2 else "Providing specific recommendations" if session.context.conversation_depth <= 5 else "Deepening planning details"}
+- NEVER repeat exact information already discussed
+- Each response should advance the conversation forward
+- Build on previously established context rather than starting fresh
+
 MANDATORY RESPONSE RULES:
 1. NEVER give generic responses when context shows a specific destination
 2. ALWAYS use the destination name explicitly in your response, don't just say "there"
 3. If user asks about weather without specifying location, use the current destination focus
 4. Reference previous conversation naturally and build on established context
+5. NEVER contradict previously confirmed user preferences (especially interest types)
+6. Don't ask about preferences you've already confirmed (e.g., don't ask about city vs landscape if user already said landscapes)
 """
         
         return context_summary
+    
+    def _extract_confirmed_preferences(self, session: ConversationSession) -> str:
+        """Extract and remember confirmed user preferences to prevent contradictions"""
+        preferences = []
+        
+        # Extract from conversation history
+        for msg in session.messages:
+            if msg.role == MessageRole.USER:
+                content = msg.content.lower()
+                
+                # Interest types
+                if any(word in content for word in ['landscape', 'photography', 'photo']):
+                    preferences.append("CONFIRMED: User wants landscape photography")
+                if any(word in content for word in ['city', 'urban', 'vibrant city']):
+                    preferences.append("CONFIRMED: User wants city experiences")
+                if any(word in content for word in ['culture', 'cultural', 'local']):
+                    preferences.append("CONFIRMED: User wants cultural experiences")
+                if any(word in content for word in ['adventure', 'hiking', 'outdoor']):
+                    preferences.append("CONFIRMED: User wants adventure activities")
+                
+                # Trip type
+                if any(word in content for word in ['solo', 'first', 'alone']):
+                    preferences.append("CONFIRMED: First solo trip")
+                if any(word in content for word in ['overwhelmed', 'nervous', 'worried']):
+                    preferences.append("CONFIRMED: User feeling nervous/overwhelmed")
+                
+                # Specific interests mentioned
+                if 'incredible landscapes' in content:
+                    preferences.append("CONFIRMED: Wants incredible landscapes (NOT cities)")
+                if 'love photography' in content:
+                    preferences.append("CONFIRMED: Photography enthusiast")
+        
+        # From stored context
+        if session.context.interests:
+            for interest in session.context.interests:
+                preferences.append(f"STORED: {interest}")
+        
+        if session.context.current_destination:
+            preferences.append(f"DESTINATION FOCUS: {session.context.current_destination}")
+        
+        return "\n".join(preferences) if preferences else "No confirmed preferences yet"
+    
+    def _track_user_preferences(self, session: ConversationSession, message: str):
+        """Track and validate user preferences to prevent contradictions"""
+        message_lower = message.lower()
+        
+        # Track travel style preferences
+        if any(word in message_lower for word in ['landscape', 'photography', 'incredible landscapes']):
+            if 'landscape_photography' not in session.context.interests:
+                session.context.interests = session.context.interests or []
+                session.context.interests.append('landscape_photography')
+        
+        if any(word in message_lower for word in ['solo', 'first', 'alone', 'overwhelmed']):
+            if 'solo_travel' not in session.context.interests:
+                session.context.interests = session.context.interests or []
+                session.context.interests.append('solo_travel')
+        
+        # Track explicit destination mentions
+        destinations = ['iceland', 'banff', 'new zealand', 'norway', 'patagonia', 'dolomites', 
+                       'paris', 'tokyo', 'new york', 'london', 'barcelona']
+        
+        for dest in destinations:
+            if dest in message_lower and not session.context.current_destination:
+                # Validate destination matches user's interests
+                if self._validate_destination_relevance(dest, session.context.interests):
+                    session.context.current_destination = dest.title()
+                    break
+    
+    def _validate_destination_relevance(self, destination: str, interests: List[str]) -> bool:
+        """Validate that suggested destination matches user's stated interests"""
+        if not interests:
+            return True  # No conflicts yet
+        
+        landscape_destinations = ['iceland', 'banff', 'new zealand', 'norway', 'patagonia', 'dolomites']
+        city_destinations = ['paris', 'tokyo', 'new york', 'london', 'barcelona']
+        
+        # If user wants landscape photography, don't accept city destinations
+        if 'landscape_photography' in interests and destination.lower() in city_destinations:
+            return False
+        
+        # If user wants city experiences, landscape destinations might still be ok
+        # (some cities have both urban and natural elements)
+        
+        return True
     
     def _extract_implicit_context(self, messages: List) -> Dict[str, str]:
         """Extract implicit context clues from conversation history"""

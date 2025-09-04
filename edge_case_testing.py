@@ -8,12 +8,12 @@ LLM limitations, and unusual scenarios that could break other systems.
 
 import asyncio
 from app.core.conversation import ConversationEngine
-from app.services.llm import HuggingFaceService, ResponseValidator
+from app.services.llm import OpenRouterService, ResponseValidator
 
 class EdgeCaseTester:
     def __init__(self):
         self.conversation_engine = ConversationEngine()
-        self.llm_service = HuggingFaceService()
+        self.llm_service = OpenRouterService()
     
     def test_unusual_travel_requests(self):
         """Test bizarre and impossible travel requests"""

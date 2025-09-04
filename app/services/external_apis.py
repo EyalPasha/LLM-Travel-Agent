@@ -291,10 +291,11 @@ class DataAugmentationService:
         
         msg_lower = user_message.lower()
         
-        # Enhanced weather detection
+        # Enhanced weather detection - MORE RESTRICTIVE
         weather_keywords = [
             'weather', 'temperature', 'rain', 'sunny', 'cloudy', 'snow', 'hot', 'cold', 
-            'climate', 'forecast', 'degrees', 'celsius', 'fahrenheit', 'humid', 'windy'
+            'climate', 'forecast', 'degrees', 'celsius', 'fahrenheit', 'humid', 'windy',
+            'what\'s it like', 'how\'s the weather', 'what\'s the temperature'
         ]
         
         # Enhanced country/culture detection  
@@ -303,11 +304,34 @@ class DataAugmentationService:
             'population', 'food', 'religion', 'history', 'people', 'local'
         ]
         
-        # Check for explicit weather requests
+        # Check for explicit weather requests - MUCH MORE RESTRICTIVE
         weather_score = 0.0
+        explicit_weather_request = False
         for keyword in weather_keywords:
             if keyword in msg_lower:
                 weather_score = max(weather_score, 0.9)
+                explicit_weather_request = True
+                break
+        
+        # Additional check: Only include weather if it's REALLY about weather
+        if not explicit_weather_request:
+            # Check for contextual weather needs (like packing, timing, etc.)
+            contextual_weather = [
+                'what to pack', 'what should i bring', 'what to wear', 
+                'best time to visit', 'when to go', 'good time for'
+            ]
+            for phrase in contextual_weather:
+                if phrase in msg_lower:
+                    weather_score = max(weather_score, 0.6)
+                    break
+        
+        # Don't include weather for general travel questions
+        if any(phrase in msg_lower for phrase in [
+            'hidden gems', 'photo spots', 'photography', 'activities', 'things to do',
+            'restaurants', 'hotels', 'attractions', 'sightseeing', 'itinerary',
+            'travel tips', 'recommendations', 'suggestions', 'advice'
+        ]) and weather_score < 0.9:  # Only override if not explicitly asking for weather
+            weather_score = 0.0
         
         # Check for forecast-specific requests
         forecast_keywords = ['forecast', 'tomorrow', 'next week', 'next few days', 'this week']

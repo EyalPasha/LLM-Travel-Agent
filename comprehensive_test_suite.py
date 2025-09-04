@@ -22,7 +22,7 @@ from datetime import datetime
 # Import our application components
 from app.main import app
 from app.core.conversation import ConversationEngine
-from app.services.llm import HuggingFaceService
+from app.services.llm import OpenRouterService
 from app.services.external_apis import WeatherService, DataAugmentationService
 from app.core.date_context import DateContextManager
 from app.models.conversation import ChatRequest, MessageRole
@@ -32,7 +32,7 @@ class TravelAssistantTestSuite:
     
     def __init__(self):
         self.conversation_engine = ConversationEngine()
-        self.llm_service = HuggingFaceService()
+        self.llm_service = OpenRouterService()
         self.data_service = DataAugmentationService()
         self.date_manager = DateContextManager()
         self.test_session = f"test_session_{int(time.time())}"

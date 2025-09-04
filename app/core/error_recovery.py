@@ -48,6 +48,17 @@ class ErrorPattern:
         "I don't follow", "that doesn't make sense", "completely off topic"
     ]
     
+    HALLUCINATION_INDICATORS = [
+        "that's not accurate", "that's wrong about", "actually no",
+        "that doesn't sound right", "I don't think that's correct",
+        "but I said I wanted", "but I'm interested in", "that's not what I meant"
+    ]
+    
+    PREFERENCE_CONTRADICTION_INDICATORS = [
+        "but I said I want", "I already told you I prefer", "you suggested the opposite",
+        "that contradicts what I said", "I specifically said", "but I don't want"
+    ]
+    
     INTENT_AMBIGUITY_INDICATORS = [
         "I meant", "actually", "no, I was asking about", "that's not what I",
         "let me clarify", "I'm looking for", "I need help with"
@@ -84,6 +95,16 @@ class ConversationRecoveryEngine:
         ambiguity_score = self._calculate_ambiguity_score(user_msg_lower, session)
         if ambiguity_score > 0.4:
             detected_issues.append((ErrorType.INTENT_AMBIGUITY, ambiguity_score))
+        
+        # Hallucination detection
+        hallucination_score = self._detect_hallucination_indicators(user_msg_lower, session)
+        if hallucination_score > 0.5:
+            detected_issues.append((ErrorType.INVALID_RESPONSE, hallucination_score))
+        
+        # Preference contradiction detection
+        contradiction_score = self._detect_preference_contradictions(user_msg_lower, session)
+        if contradiction_score > 0.6:
+            detected_issues.append((ErrorType.CONTEXT_CONFUSION, contradiction_score))
         
         # Response quality issues
         if ai_response:
@@ -436,3 +457,45 @@ class ConversationRecoveryEngine:
             'error_type_distribution': error_types,
             'most_common_error': max(error_types.keys(), key=error_types.get) if error_types else None
         }
+    
+    def _detect_hallucination_indicators(self, user_msg_lower: str, session: ConversationSession) -> float:
+        """Detect indicators that the AI provided inaccurate information"""
+        score = 0.0
+        
+        # Direct hallucination indicators
+        for indicator in ErrorPattern.HALLUCINATION_INDICATORS:
+            if indicator in user_msg_lower:
+                score += 0.4
+        
+        # Check for correction attempts
+        correction_patterns = [
+            "actually", "no that's", "that's incorrect", "wrong about",
+            "not accurate", "doesn't sound right"
+        ]
+        
+        for pattern in correction_patterns:
+            if pattern in user_msg_lower:
+                score += 0.3
+        
+        return min(score, 1.0)
+    
+    def _detect_preference_contradictions(self, user_msg_lower: str, session: ConversationSession) -> float:
+        """Detect when AI contradicts previously stated user preferences"""
+        score = 0.0
+        
+        # Direct contradiction indicators
+        for indicator in ErrorPattern.PREFERENCE_CONTRADICTION_INDICATORS:
+            if indicator in user_msg_lower:
+                score += 0.5
+        
+        # Check if user is reminding about previously stated preferences
+        reminder_patterns = [
+            "i already said", "i told you", "like i mentioned", 
+            "as i said before", "i specified", "my preference"
+        ]
+        
+        for pattern in reminder_patterns:
+            if pattern in user_msg_lower:
+                score += 0.3
+        
+        return min(score, 1.0)

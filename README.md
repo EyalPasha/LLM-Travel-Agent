@@ -147,7 +147,7 @@ For complex travel planning, Sofia uses a structured thinking process:
 │   ├── config.py          # Configuration management
 │   └── error_recovery.py  # Advanced error handling
 ├── 📁 services/           # External integrations
-│   ├── llm.py            # HuggingFace LLM service
+│   ├── llm.py            # OpenRouter LLM service
 │   └── external_apis.py  # Weather & country data APIs
 ├── 📁 models/            # Data models & validation
 │   └── conversation.py   # Pydantic models
@@ -172,7 +172,7 @@ For complex travel planning, Sofia uses a structured thinking process:
 
 #### 🤖 **LLM Service** (`app/services/llm.py`)
 
-- **HuggingFace Router API** integration
+- **OpenRouter API** integration
 - **Response quality validation** (hallucination & confusion detection)
 - **Adaptive parameter tuning** (temperature based on query type)
 - **Graceful error handling** with fallback responses
@@ -192,7 +192,7 @@ For complex travel planning, Sofia uses a structured thinking process:
 
 - Python 3.8+
 - FastAPI
-- HuggingFace API key
+- OpenRouter API key
 - OpenWeatherMap API key (optional - has fallbacks)
 
 ### ⚡ **Quick Setup**
@@ -206,7 +206,7 @@ cd LLM
 pip install -r requirements.txt
 
 # Set environment variables
-export HUGGINGFACE_API_KEY="your_hf_key_here"
+export OPENROUTER_API_KEY="your_openrouter_key_here"
 export OPENWEATHER_API_KEY="your_weather_key_here"  # Optional
 
 # Run the application
@@ -519,7 +519,7 @@ Ready for real-world deployment:
 
 ### 🐛 **Troubleshooting**
 
-- **API Keys**: Ensure HuggingFace API key is set (weather API is optional)
+- **API Keys**: Ensure OpenRouter API key is set (weather API is optional)
 - **Dependencies**: Run `pip install -r requirements.txt`
 - **Port conflicts**: Change port with `--port 8001` if 8000 is in use
 
@@ -538,7 +538,7 @@ This project is available under the MIT License. See the LICENSE file for detail
 *Built with ❤️ using advanced prompt engineering and AI technology*
 
 [![Made with FastAPI](https://img.shields.io/badge/Made%20with-FastAPI-009688.svg)](https://fastapi.tiangolo.com/)
-[![Powered by HuggingFace](https://img.shields.io/badge/Powered%20by-🤗%20HuggingFace-yellow)](https://huggingface.co/)
+[![Powered by OpenRouter](https://img.shields.io/badge/Powered%20by-🚀%20OpenRouter-blue)](https://openrouter.ai/)
 [![Grade A+](https://img.shields.io/badge/Assignment%20Grade-A+-brightgreen)](./travel_assistant_report.py)
 
 </div>
