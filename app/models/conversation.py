@@ -50,6 +50,8 @@ class ConversationContext(BaseModel):
     previous_destinations: List[str] = Field(default_factory=list)
     conversation_depth: int = 0
     last_external_data_used: Optional[str] = None
+    weather_mentioned_for: Optional[str] = None  # Track destination for which weather was mentioned
+    weather_mentioned_at: Optional[datetime] = None  # Track when weather was mentioned
 
 
 class ConversationSession(BaseModel):

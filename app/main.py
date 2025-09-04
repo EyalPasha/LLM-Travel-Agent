@@ -1011,6 +1011,18 @@ async def chat(request: ChatRequest):
         context_manager = SmartContextManager()
         evolved_context = context_manager.extract_evolving_context(session.messages, session.session_id)
         
+        # Check if weather was recently mentioned for this destination
+        weather_recently_mentioned = (
+            session.context.weather_mentioned_for == session.context.current_destination and
+            session.context.weather_mentioned_at and
+            (datetime.now() - session.context.weather_mentioned_at).total_seconds() < 3600  # Within last hour
+        )
+        
+        # Check if user is explicitly asking about weather
+        user_asking_weather = any(keyword in request.message.lower() for keyword in [
+            'weather', 'temperature', 'climate', 'rain', 'sunny', 'cold', 'hot', 'degrees'
+        ])
+        
         # Generate psychological profile
         psychological_profile = context_manager.psychological_profiler.analyze_user_psychology(
             session.messages, session.session_id
@@ -1022,7 +1034,7 @@ async def chat(request: ChatRequest):
         )
         
         # Add conversation quality instructions
-        quality_instructions = """
+        quality_instructions = f"""
         
 CONVERSATION QUALITY GUIDELINES:
 - Keep responses focused and actionable
@@ -1031,6 +1043,13 @@ CONVERSATION QUALITY GUIDELINES:
 - Avoid repetition of previously covered information
 - Adapt tone to user's engagement level
 - Be helpful but not overwhelming
+
+WEATHER INFORMATION POLICY:
+- Weather recently mentioned for {session.context.current_destination}: {'Yes' if weather_recently_mentioned else 'No'}
+- User explicitly asking about weather: {'Yes' if user_asking_weather else 'No'}
+- ONLY mention weather if user asks about it OR if no weather was mentioned for this destination yet
+- If weather was recently provided, focus on the user's actual question instead
+- When providing weather, use real-time data and be concise (1-2 sentences max)
 
 MANDATORY CONTEXT CHECK:
 Before responding, you MUST check the "CONTEXT AWARENESS" section below for:
@@ -1053,7 +1072,7 @@ WEATHER RESPONSES:
         
         # Use data orchestration instead of basic data gathering
         data_orchestration_result = await data_service.intelligent_data_orchestration(
-            request.message, session.context.current_destination, psychological_profile
+            request.message, session.context.current_destination, psychological_profile, session
         )
         external_data = data_orchestration_result.get('data', {})
         data_metadata = data_orchestration_result.get('metadata', {})
@@ -1138,8 +1157,22 @@ IMMEDIATE COMPLIANCE REQUIRED - NO EXCEPTIONS.
                 
                 # Force a contextual response based on the specific query
                 if "weather" in request.message.lower() or "temperature" in request.message.lower():
-                    # Handle weather queries for established destinations
-                    final_response = f"The weather in {session.context.current_destination} is pleasant right now. For photography, you'll want to consider the lighting conditions - {session.context.current_destination} offers great opportunities for capturing landscapes. What specific type of photography are you most interested in?"
+                    # Handle weather queries for established destinations with REAL weather data
+                    try:
+                        weather_data = await data_service.weather_service.get_current_weather(session.context.current_destination)
+                        if weather_data:
+                            temp_str = f"{weather_data.temperature:.0f}°C"
+                            condition_str = weather_data.description
+                            final_response = f"It's {temp_str} and {condition_str} in {session.context.current_destination} today! Perfect weather for exploring the city. What specific type of photography are you most interested in?"
+                            
+                            # Track that weather was mentioned for this destination
+                            session.context.weather_mentioned_for = session.context.current_destination
+                            session.context.weather_mentioned_at = datetime.now()
+                        else:
+                            final_response = f"I'd love to help you plan photography in {session.context.current_destination}! What specific type of photography are you most interested in?"
+                    except Exception as e:
+                        logger.error(f"Weather API error: {e}")
+                        final_response = f"I'd love to help you plan photography in {session.context.current_destination}! What specific type of photography are you most interested in?"
                 elif "best time" in request.message.lower() and "visit" in request.message.lower():
                     # Handle timing questions
                     final_response = f"For photography in {session.context.current_destination}, the best times are typically during golden hours for stunning light, and different seasons offer unique opportunities. What style of photography captures your interest most?"
@@ -1159,6 +1192,10 @@ IMMEDIATE COMPLIANCE REQUIRED - NO EXCEPTIONS.
                 for data_type, data in external_data.items():
                     if data_type == "weather":
                         formatted_data["weather"] = data_service.format_weather_for_llm(data)
+                        # Track weather mention when external weather data is used
+                        if session.context.current_destination:
+                            session.context.weather_mentioned_for = session.context.current_destination
+                            session.context.weather_mentioned_at = datetime.now()
                     elif data_type == "forecast":
                         # Extract location from the forecast data or session context
                         location = session.context.current_destination or "the location"

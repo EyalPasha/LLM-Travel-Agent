@@ -477,16 +477,35 @@ This data can inform cultural context, practical planning, and local insights.
         return age_hours <= threshold
     
     async def intelligent_data_orchestration(self, user_message: str, destination: Optional[str],
-                                           psychological_profile: Dict = None) -> Dict[str, Any]:
+                                           psychological_profile: Dict = None, session = None) -> Dict[str, Any]:
         """Orchestrate intelligent data gathering with caching and prioritization"""
         
         if not destination:
             return {'data': {}, 'metadata': {}, 'strategy_used': {}}
         
+        # Check if weather was recently mentioned (and user isn't explicitly asking for weather)
+        user_asking_weather = any(keyword in user_message.lower() for keyword in [
+            'weather', 'temperature', 'climate', 'rain', 'sunny', 'cold', 'hot', 'degrees'
+        ])
+        
+        weather_recently_mentioned = False
+        if session and hasattr(session, 'context'):
+            from datetime import datetime
+            weather_recently_mentioned = (
+                session.context.weather_mentioned_for == destination and
+                session.context.weather_mentioned_at and
+                (datetime.now() - session.context.weather_mentioned_at).total_seconds() < 3600  # Within last hour
+            )
+        
         # Analyze data needs
         data_strategy = await self.intelligent_data_decision(
             user_message, destination, psychological_profile
         )
+        
+        # Override weather strategy if weather was recently mentioned and user isn't explicitly asking
+        if weather_recently_mentioned and not user_asking_weather:
+            data_strategy['weather']['fetch'] = False
+            data_strategy['forecast']['fetch'] = False
         
         freshness_requirements = self.evaluate_data_freshness_importance(user_message, destination)
         
